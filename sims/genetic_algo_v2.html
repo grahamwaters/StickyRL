@@ -141,7 +141,7 @@
   const ctx = canvas.getContext("2d");
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-
+  let sizeFactor = 20; // this helps know how to many agents (fish) to spawn.
   function randomInRange(min, max) {
     return Math.random() * (max - min) + min;
   }
@@ -159,10 +159,10 @@
   }
 
   const params = {
-    pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
+    pondRadius: Math.min(canvas.width, canvas.height) / 3 + sizeFactor,
     pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
-    fishCount: 50,
-    maxSpeed: 1,
+    fishCount: sizeFactor - 12,
+    maxSpeed: 0.5,
     maxForce: 0.05,
     perceptionRadius: 20,
     separationDistance: 10,
@@ -175,26 +175,26 @@
     cohesionWeight: 0.5,
     currentStrength: 0.001,
     currentRandomness: 0.25,
-    islandCount: 2,
+    islandCount: 2, // this is half the actual number for some reason.
     fishBaseColor: 30,
-    fishMaxHunger: 1.0,
+    fishMaxHunger: 1.00,
     hungerDecreaseRate: 0.001,
     edgeDangerMultiplier: 2.0,
-    foodSpawnInterval: 100,
-    foodRestoreAmount: 0.5,
-    stepsPerEpoch: 2000,
-    learningRate: 0.01,
+    foodSpawnInterval: 20, // was 100
+    foodRestoreAmount: 0.5, // how much hp eating food will restore.
+    stepsPerEpoch: 200, // was 2000
+    learningRate: 0.02,
     w_alignment: 1.0,
     w_cohesion: 0.5,
     w_separation: 0.5,
-    predatorSpeed: 0.5,
-    predatorMaxForce: 0.02,
+    predatorSpeed: 0.80, // moves at 80% of the speed of the fish.
+    predatorMaxForce: 0.04,
     showHunger: true,
     reefDotSize: 2,
     // Damage parameters
-    damageIsland: 0.002,
-    damagePredator: 0.001,
-    damageOvercrowd: 0.008,
+    damageIsland: 0.009,
+    damagePredator: 0.01,
+    damageOvercrowd: 0.01,
   };
 
   const fishArray = [];
