@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Koi Fish with Islands, Predator, and Off-Coast Food</title>
+  <title>Refined Koi Simulation</title>
   <style>
     body {
       margin: 0;
@@ -39,7 +39,7 @@
       font-size: 12px;
       z-index: 998;
       border-top: 1px solid #ccc;
-      display: none; /* Start hidden */
+      display: none;
     }
 
     #scoreboard table {
@@ -69,7 +69,7 @@
       font-size: 14px;
     }
 
-    #toggleScoreboardBtn {
+    #toggleScoreboardBtn, #toggleHungerBtn {
       position: absolute;
       bottom: 210px;
       left: 10px;
@@ -80,6 +80,11 @@
       cursor: pointer;
       font-size: 12px;
       border-radius: 3px;
+      margin-top: 5px;
+    }
+
+    #toggleHungerBtn {
+      bottom: 240px;
     }
   </style>
 </head>
@@ -101,7 +106,8 @@
   <label>Cohesion Weight: <input type="range" id="cohWeight" min="0" max="5" step="0.1" value="0.5"/></label>
 </div>
 
-<button id="toggleScoreboardBtn">Toggle Data Table</button>
+<button id="toggleHungerBtn">Hide Hunger</button>
+<button id="toggleScoreboardBtn">Show Data Table</button>
 
 <div id="scoreboard">
   <table>
@@ -125,6 +131,24 @@
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
+  // Utility functions
+  function randomInRange(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  // Point in polygon test (ray-casting)
+  function pointInPolygon(point, polygon) {
+    let { x, y } = point;
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi)*(y - yi)/(yj - yi)+ xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
   const params = {
     pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
     pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
@@ -147,19 +171,21 @@
     fishMaxHunger: 1.0,
     hungerDecreaseRate: 0.001,
     edgeDangerMultiplier: 2.0,
-    foodSpawnInterval: 20,
+    foodSpawnInterval: 100,
     foodRestoreAmount: 0.5,
     stepsPerEpoch: 2000,
-    learningRate: 0.01,
+    learningRate: 0.05,
     w_alignment: 1.0,
     w_cohesion: 0.5,
     w_separation: 0.5,
     predatorSpeed: 0.5,
-    predatorMaxForce: 0.02
+    predatorMaxForce: 0.02,
+    showHunger: true
   };
 
   let stepCount = 0;
   let epochCount = 0;
+  let globalTime = 0;
 
   const fishArray = [];
   const islands = [];
@@ -167,12 +193,7 @@
 
   let cumulativeReward = 0;
   let fishIDCounter = 1;
-
   let predator;
-
-  function randomInRange(min, max) {
-    return Math.random() * (max - min) + min;
-  }
 
   function generateLake() {
     const points = [];
@@ -196,40 +217,71 @@
     ctx.fill();
   }
 
-  function generateIslands(count) {
-    for (let i = 0; i < count; i++) {
-      const islandCenter = {
-        x: randomInRange(
-          params.pondCenter.x - params.pondRadius / 2,
-          params.pondCenter.x + params.pondRadius / 2
-        ),
-        y: randomInRange(
-          params.pondCenter.y - params.pondRadius / 2,
-          params.pondCenter.y + params.pondRadius / 2
-        ),
-      };
-      const points = [];
-      const size = randomInRange(20, 50);
+  // Ensure islands are spaced apart
+  function islandsOverlap(x, y, size) {
+    for (let points of islands) {
+      // Approximate center
+      let cx = points.reduce((sum,p) => sum+p.x,0)/points.length;
+      let cy = points.reduce((sum,p) => sum+p.y,0)/points.length;
+      let dx = cx - x;
+      let dy = cy - y;
+      let dist = Math.hypot(dx,dy);
+      // If centers are too close (less than sum of sizes)
+      if (dist < size*2) return true;
+    }
+    return false;
+  }
 
-      for (let angle = 0; angle < 360; angle += 20) {
-        const rad = (Math.PI / 180) * angle;
-        const radius = size + randomInRange(-10, 10);
-        const x = islandCenter.x + Math.cos(rad) * radius;
-        const y = islandCenter.y + Math.sin(rad) * radius;
-        points.push({ x, y });
+  function generateIslands(count) {
+    let attempts = 0;
+    for (let i = 0; i < count; i++) {
+      let islandPoints;
+      let islandCenter;
+      let size;
+      let valid = false;
+      while (!valid && attempts < 1000) {
+        attempts++;
+        islandCenter = {
+          x: randomInRange(
+            params.pondCenter.x - params.pondRadius/2,
+            params.pondCenter.x + params.pondRadius/2
+          ),
+          y: randomInRange(
+            params.pondCenter.y - params.pondRadius/2,
+            params.pondCenter.y + params.pondRadius/2
+          ),
+        };
+        size = randomInRange(40,70);
+        if (islandsOverlap(islandCenter.x,islandCenter.y,size)) continue;
+
+        islandPoints = [];
+        for (let angle = 0; angle < 360; angle += 20) {
+          const rad = (Math.PI/180)*angle;
+          const radius = size + randomInRange(-15,15);
+          const x = islandCenter.x + Math.cos(rad)*radius;
+          const y = islandCenter.y + Math.sin(rad)*radius;
+          islandPoints.push({ x, y });
+        }
+        valid = true;
       }
-      islands.push(points);
+      if (valid) islands.push(islandPoints);
+      else break;
     }
   }
 
   function drawIslands() {
-    ctx.fillStyle = "#228B22";
     islands.forEach((points) => {
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       points.forEach((point) => ctx.lineTo(point.x, point.y));
       ctx.closePath();
+
+      ctx.fillStyle = "#00FF00";
       ctx.fill();
+
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     });
   }
 
@@ -237,20 +289,36 @@
     constructor(x, y) {
       this.position = { x, y };
       this.size = 5;
-      // Give the food a small random velocity for drifting
       this.vel = { x: randomInRange(-0.1,0.1), y: randomInRange(-0.1,0.1) };
     }
 
     update() {
-      // Food drifts slightly
       this.position.x += this.vel.x;
       this.position.y += this.vel.y;
 
-      // Gently nudge velocities to simulate "tides"
       this.vel.x += randomInRange(-0.01,0.01);
       this.vel.y += randomInRange(-0.01,0.01);
 
-      // Limit drift speed
+      // Check if inside island, if so push out
+      for (let island of islands) {
+        if (pointInPolygon(this.position, island)) {
+          // push out by finding nearest angle
+          // Just push away from island center
+          let cx = island.reduce((s,p) => s+p.x,0)/island.length;
+          let cy = island.reduce((s,p) => s+p.y,0)/island.length;
+          let dx = this.position.x - cx;
+          let dy = this.position.y - cy;
+          let dist = Math.hypot(dx,dy);
+          if (dist === 0) {dx = 1; dist = 1;}
+          dx /= dist; dy /= dist;
+          this.position.x += dx*2;
+          this.position.y += dy*2;
+          // Also adjust velocity away
+          this.vel.x += dx*0.1;
+          this.vel.y += dy*0.1;
+        }
+      }
+
       const speed = Math.hypot(this.vel.x,this.vel.y);
       if (speed > 0.2) {
         this.vel.x = (this.vel.x/speed)*0.2;
@@ -269,18 +337,15 @@
   function spawnFoodOffCoast() {
     if (islands.length === 0) return;
     const island = islands[Math.floor(Math.random() * islands.length)];
-    // Approximate island center
     const centerX = island.reduce((sum, p) => sum + p.x, 0) / island.length;
     const centerY = island.reduce((sum, p) => sum + p.y, 0) / island.length;
 
-    // Compute approximate island radius
     let radiusSum = 0;
     island.forEach(p => {
       radiusSum += Math.hypot(p.x - centerX, p.y - centerY);
     });
     const avgRadius = radiusSum / island.length;
 
-    // Place food slightly off the coast: radius + small offset
     const angle = Math.random() * 2 * Math.PI;
     const foodRadius = avgRadius + randomInRange(10,30);
     const x = centerX + foodRadius * Math.cos(angle);
@@ -303,6 +368,8 @@
       this.epochsSurvived = 0;
       this.foodEaten = 0;
       this.baseHue = params.fishBaseColor;
+      this.bodyLength = 10; // smaller fish now
+      this.bodyWidth = 4;
     }
 
     update(fishArray) {
@@ -329,7 +396,7 @@
       }
 
       this.avoidEdges();
-      this.avoidIslands();
+      this.avoidIslands(); // precise polygon-based avoidance
     }
 
     decreaseHunger() {
@@ -464,17 +531,6 @@
         steer.y /= count;
       }
 
-    // removed the lines below to allow fish to reach food.
-      // Additional "shove" near food
-      //foods.forEach(food => {
-      //  const d = Math.hypot(this.position.x - food.position.x, this.position.y - food.position.y);
-      //  if (d < 20) {
-      //    steer.x += (this.position.x - food.position.x) * 0.01;
-      //    steer.y += (this.position.y - food.position.y) * 0.01;
-      //  }
-      //});
-
-
       const mag = Math.hypot(steer.x, steer.y);
       if (mag > 0) {
         steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
@@ -503,18 +559,20 @@
     }
 
     avoidIslands() {
-      islands.forEach((points) => {
-        const centerX = points.reduce((sum, p) => sum + p.x, 0) / points.length;
-        const centerY = points.reduce((sum, p) => sum + p.y, 0) / points.length;
-
-        const distToIsland = Math.hypot(this.position.x - centerX, this.position.y - centerY);
-        if (distToIsland < params.islandRepelRadius) {
-          const angle = Math.atan2(this.position.y - centerY, this.position.x - centerX);
-          const force = (params.islandRepelRadius - distToIsland) * params.islandRepelForce;
-          this.acceleration.x += Math.cos(angle) * force;
-          this.acceleration.y += Math.sin(angle) * force;
+      // If inside island polygon, push out
+      for (let island of islands) {
+        if (pointInPolygon(this.position, island)) {
+          let cx = island.reduce((s,p) => s+p.x,0)/island.length;
+          let cy = island.reduce((s,p) => s+p.y,0)/island.length;
+          let dx = this.position.x - cx;
+          let dy = this.position.y - cy;
+          let dist = Math.hypot(dx,dy);
+          if (dist === 0) {dx=1; dist=1;}
+          dx/=dist; dy/=dist;
+          this.acceleration.x += dx * 0.5;
+          this.acceleration.y += dy * 0.5;
         }
-      });
+      }
     }
 
     alignment(fishArray) {
@@ -592,23 +650,72 @@
 
     draw() {
       if (!this.alive) return;
+
+      const tailAngle = Math.sin(globalTime*0.2 + this.fishID) * 0.5;
+      const finAngle = Math.sin(globalTime*0.4 + this.fishID) * 0.3;
+
       ctx.save();
       ctx.translate(this.position.x, this.position.y);
       ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
       let hue = this.baseHue + this.epochsSurvived * 40;
       ctx.fillStyle = `hsl(${hue},100%,50%)`;
 
+      // Draw body smaller: ellipse(0,0,10,4)
       ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(-15, 10, -10, 5);
-      ctx.lineTo(-10, -5);
-      ctx.quadraticCurveTo(-15, -10, 0, 0);
+      ctx.ellipse(0,0,this.bodyLength,this.bodyWidth,0,0,2*Math.PI);
+      ctx.fill();
+
+      // Flag-like tail: a slender rectangle waving like a flag
+      ctx.save();
+      ctx.translate(-this.bodyLength,0);
+      ctx.rotate(tailAngle);
+      ctx.fillStyle = `hsl(${hue},100%,40%)`;
+      ctx.beginPath();
+      // A thin tail like a flag
+      ctx.moveTo(0,0);
+      ctx.lineTo(-10,2);
+      ctx.lineTo(-10,-2);
+      ctx.closePath();
       ctx.fill();
       ctx.restore();
 
-      ctx.fillStyle = "white";
-      ctx.font = "10px sans-serif";
-      ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+      // Side fins like small flags
+      ctx.save();
+      ctx.translate(-3,0);
+      // top fin
+      ctx.save();
+      ctx.rotate(-Math.PI/2 + finAngle);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(-5,-2);
+      ctx.lineTo(-5,-5);
+      ctx.closePath();
+      ctx.fillStyle='rgba(255,255,255,0.8)';
+      ctx.fill();
+      ctx.restore();
+
+      // bottom fin
+      ctx.save();
+      ctx.rotate(Math.PI/2 - finAngle);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(-5,2);
+      ctx.lineTo(-5,5);
+      ctx.closePath();
+      ctx.fillStyle='rgba(255,255,255,0.8)';
+      ctx.fill();
+      ctx.restore();
+
+      ctx.restore();
+
+      ctx.restore();
+
+      if (params.showHunger) {
+        ctx.fillStyle = "white";
+        ctx.font = "10px sans-serif";
+        ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+      }
     }
   }
 
@@ -703,6 +810,7 @@
   predator = new Predator();
 
   function animate() {
+    globalTime += 1;
     stepCount++;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -827,16 +935,24 @@
 
   // Toggle scoreboard
   const scoreboard = document.getElementById("scoreboard");
-  const toggleBtn = document.getElementById("toggleScoreboardBtn");
-  toggleBtn.addEventListener("click", () => {
+  const toggleScoreBtn = document.getElementById("toggleScoreboardBtn");
+  toggleScoreBtn.addEventListener("click", () => {
     if (scoreboard.style.display === "none") {
       scoreboard.style.display = "block";
-      toggleBtn.textContent = "Hide Data Table";
+      toggleScoreBtn.textContent = "Hide Data Table";
     } else {
       scoreboard.style.display = "none";
-      toggleBtn.textContent = "Show Data Table";
+      toggleScoreBtn.textContent = "Show Data Table";
     }
+  });
+
+  // Toggle hunger display
+  const toggleHungerBtn = document.getElementById("toggleHungerBtn");
+  toggleHungerBtn.addEventListener("click", () => {
+    params.showHunger = !params.showHunger;
+    toggleHungerBtn.textContent = params.showHunger ? "Hide Hunger" : "Show Hunger";
   });
 </script>
 </body>
 </html>
+]

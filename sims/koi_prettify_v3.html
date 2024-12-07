@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Koi Fish with Islands, Predator, and Off-Coast Food</title>
+  <title>Koi Fish with Islands, Predator, Off-Coast Food, and Animated Bodies</title>
   <style>
     body {
       margin: 0;
@@ -39,7 +39,7 @@
       font-size: 12px;
       z-index: 998;
       border-top: 1px solid #ccc;
-      display: none; /* Start hidden */
+      display: none;
     }
 
     #scoreboard table {
@@ -69,7 +69,7 @@
       font-size: 14px;
     }
 
-    #toggleScoreboardBtn {
+    #toggleScoreboardBtn, #toggleHungerBtn {
       position: absolute;
       bottom: 210px;
       left: 10px;
@@ -80,6 +80,11 @@
       cursor: pointer;
       font-size: 12px;
       border-radius: 3px;
+      margin-top: 5px;
+    }
+
+    #toggleHungerBtn {
+      bottom: 240px; /* place this button slightly above scoreboard toggle */
     }
   </style>
 </head>
@@ -101,7 +106,8 @@
   <label>Cohesion Weight: <input type="range" id="cohWeight" min="0" max="5" step="0.1" value="0.5"/></label>
 </div>
 
-<button id="toggleScoreboardBtn">Toggle Data Table</button>
+<button id="toggleHungerBtn">Hide Hunger</button>
+<button id="toggleScoreboardBtn">Show Data Table</button>
 
 <div id="scoreboard">
   <table>
@@ -142,12 +148,12 @@
     cohesionWeight: 0.5,
     currentStrength: 0.001,
     currentRandomness: 0.25,
-    islandCount: 5,
+    islandCount: 2,
     fishBaseColor: 30,
     fishMaxHunger: 1.0,
     hungerDecreaseRate: 0.001,
     edgeDangerMultiplier: 2.0,
-    foodSpawnInterval: 20,
+    foodSpawnInterval: 100,
     foodRestoreAmount: 0.5,
     stepsPerEpoch: 2000,
     learningRate: 0.01,
@@ -155,11 +161,13 @@
     w_cohesion: 0.5,
     w_separation: 0.5,
     predatorSpeed: 0.5,
-    predatorMaxForce: 0.02
+    predatorMaxForce: 0.02,
+    showHunger: true
   };
 
   let stepCount = 0;
   let epochCount = 0;
+  let globalTime = 0; // for animation
 
   const fishArray = [];
   const islands = [];
@@ -209,11 +217,11 @@
         ),
       };
       const points = [];
-      const size = randomInRange(20, 50);
+      const size = randomInRange(40, 70);
 
       for (let angle = 0; angle < 360; angle += 20) {
         const rad = (Math.PI / 180) * angle;
-        const radius = size + randomInRange(-10, 10);
+        const radius = size + randomInRange(-15, 15);
         const x = islandCenter.x + Math.cos(rad) * radius;
         const y = islandCenter.y + Math.sin(rad) * radius;
         points.push({ x, y });
@@ -223,13 +231,18 @@
   }
 
   function drawIslands() {
-    ctx.fillStyle = "#228B22";
     islands.forEach((points) => {
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       points.forEach((point) => ctx.lineTo(point.x, point.y));
       ctx.closePath();
+
+      ctx.fillStyle = "#00FF00";
       ctx.fill();
+
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     });
   }
 
@@ -237,20 +250,16 @@
     constructor(x, y) {
       this.position = { x, y };
       this.size = 5;
-      // Give the food a small random velocity for drifting
       this.vel = { x: randomInRange(-0.1,0.1), y: randomInRange(-0.1,0.1) };
     }
 
     update() {
-      // Food drifts slightly
       this.position.x += this.vel.x;
       this.position.y += this.vel.y;
 
-      // Gently nudge velocities to simulate "tides"
       this.vel.x += randomInRange(-0.01,0.01);
       this.vel.y += randomInRange(-0.01,0.01);
 
-      // Limit drift speed
       const speed = Math.hypot(this.vel.x,this.vel.y);
       if (speed > 0.2) {
         this.vel.x = (this.vel.x/speed)*0.2;
@@ -269,18 +278,15 @@
   function spawnFoodOffCoast() {
     if (islands.length === 0) return;
     const island = islands[Math.floor(Math.random() * islands.length)];
-    // Approximate island center
     const centerX = island.reduce((sum, p) => sum + p.x, 0) / island.length;
     const centerY = island.reduce((sum, p) => sum + p.y, 0) / island.length;
 
-    // Compute approximate island radius
     let radiusSum = 0;
     island.forEach(p => {
       radiusSum += Math.hypot(p.x - centerX, p.y - centerY);
     });
     const avgRadius = radiusSum / island.length;
 
-    // Place food slightly off the coast: radius + small offset
     const angle = Math.random() * 2 * Math.PI;
     const foodRadius = avgRadius + randomInRange(10,30);
     const x = centerX + foodRadius * Math.cos(angle);
@@ -464,16 +470,7 @@
         steer.y /= count;
       }
 
-    // removed the lines below to allow fish to reach food.
-      // Additional "shove" near food
-      //foods.forEach(food => {
-      //  const d = Math.hypot(this.position.x - food.position.x, this.position.y - food.position.y);
-      //  if (d < 20) {
-      //    steer.x += (this.position.x - food.position.x) * 0.01;
-      //    steer.y += (this.position.y - food.position.y) * 0.01;
-      //  }
-      //});
-
+      // (If you had a "shove" near food code previously, remove or reduce it to avoid fish avoiding food.)
 
       const mag = Math.hypot(steer.x, steer.y);
       if (mag > 0) {
@@ -592,23 +589,71 @@
 
     draw() {
       if (!this.alive) return;
+
+      // Animation parameters
+      const tailAngle = Math.sin(globalTime*0.2 + this.fishID) * 0.4; // wag tail
+      const finAngle = Math.sin(globalTime*0.3 + this.fishID) * 0.2; // flap fins
+
       ctx.save();
       ctx.translate(this.position.x, this.position.y);
       ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
+
       let hue = this.baseHue + this.epochsSurvived * 40;
       ctx.fillStyle = `hsl(${hue},100%,50%)`;
 
+      // Draw body: an ellipse for the koi body
       ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(-15, 10, -10, 5);
-      ctx.lineTo(-10, -5);
-      ctx.quadraticCurveTo(-15, -10, 0, 0);
+      ctx.ellipse(0,0,20,8,0,0,2*Math.PI);
+      ctx.fill();
+
+      // Draw tail (behind body)
+      ctx.save();
+      ctx.translate(-20,0);
+      ctx.rotate(tailAngle);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.quadraticCurveTo(-10,10,-15,0);
+      ctx.quadraticCurveTo(-10,-10,0,0);
+      ctx.fillStyle = `hsl(${hue},100%,40%)`;
       ctx.fill();
       ctx.restore();
 
-      ctx.fillStyle = "white";
-      ctx.font = "10px sans-serif";
-      ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+      // Pectoral fins (small fins at mid-body), symmetrical top and bottom
+      ctx.save();
+      ctx.translate(-5,0);
+      // top fin
+      ctx.save();
+      ctx.rotate(-Math.PI/2 + finAngle);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(0,-5);
+      ctx.lineTo(5,-10);
+      ctx.closePath();
+      ctx.fillStyle='rgba(255,255,255,0.8)';
+      ctx.fill();
+      ctx.restore();
+
+      // bottom fin
+      ctx.save();
+      ctx.rotate(Math.PI/2 - finAngle);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(0,5);
+      ctx.lineTo(5,10);
+      ctx.closePath();
+      ctx.fillStyle='rgba(255,255,255,0.8)';
+      ctx.fill();
+      ctx.restore();
+      ctx.restore();
+
+      ctx.restore();
+
+      // Draw hunger only if showHunger is true
+      if (params.showHunger) {
+        ctx.fillStyle = "white";
+        ctx.font = "10px sans-serif";
+        ctx.fillText(this.hunger.toFixed(2), this.position.x + 5, this.position.y - 5);
+      }
     }
   }
 
@@ -703,6 +748,7 @@
   predator = new Predator();
 
   function animate() {
+    globalTime += 1;
     stepCount++;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -827,15 +873,22 @@
 
   // Toggle scoreboard
   const scoreboard = document.getElementById("scoreboard");
-  const toggleBtn = document.getElementById("toggleScoreboardBtn");
-  toggleBtn.addEventListener("click", () => {
+  const toggleScoreBtn = document.getElementById("toggleScoreboardBtn");
+  toggleScoreBtn.addEventListener("click", () => {
     if (scoreboard.style.display === "none") {
       scoreboard.style.display = "block";
-      toggleBtn.textContent = "Hide Data Table";
+      toggleScoreBtn.textContent = "Hide Data Table";
     } else {
       scoreboard.style.display = "none";
-      toggleBtn.textContent = "Show Data Table";
+      toggleScoreBtn.textContent = "Show Data Table";
     }
+  });
+
+  // Toggle hunger display
+  const toggleHungerBtn = document.getElementById("toggleHungerBtn");
+  toggleHungerBtn.addEventListener("click", () => {
+    params.showHunger = !params.showHunger;
+    toggleHungerBtn.textContent = params.showHunger ? "Hide Hunger" : "Show Hunger";
   });
 </script>
 </body>
