@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Refined Koi Simulation With Damage and Death Fade</title>
+  <title>Koi Evolution Simulation</title>
   <style>
     body {
       margin: 0;
@@ -151,10 +151,10 @@
   const params = {
     pondRadius: Math.min(canvas.width, canvas.height) / 3 + 150,
     pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
-    fishCount: 10,
+    fishCount: 50,
     maxSpeed: 1,
     maxForce: 0.05,
-    perceptionRadius: 50,
+    perceptionRadius: 20,
     separationDistance: 10,
     edgeBuffer: 20,
     islandRepelRadius: 50,
@@ -165,14 +165,14 @@
     cohesionWeight: 0.5,
     currentStrength: 0.001,
     currentRandomness: 0.25,
-    islandCount: 3,
+    islandCount: 5,
     fishBaseColor: 30,
     fishMaxHunger: 1.0,
     hungerDecreaseRate: 0.001,
     edgeDangerMultiplier: 2.0,
-    foodSpawnInterval: 30,
+    foodSpawnInterval: 100,
     foodRestoreAmount: 0.5,
-    stepsPerEpoch: 1000,
+    stepsPerEpoch: 2000,
     learningRate: 0.01,
     w_alignment: 1.0,
     w_cohesion: 0.5,
@@ -180,21 +180,21 @@
     predatorSpeed: 0.5,
     predatorMaxForce: 0.02,
     showHunger: true,
-
+    reefDotSize: 2,
     // Damage parameters
-    damageIsland: 0.001,
+    damageIsland: 0.002,
     damagePredator: 0.001,
-    damageOvercrowd: 0.001,
+    damageOvercrowd: 0.008,
   };
-
-  let stepCount = 0;
-  let epochCount = 0;
-  let globalTime = 0;
 
   const fishArray = [];
   const islands = [];
   const foods = [];
+  const reefDots = [];
 
+  let stepCount = 0;
+  let epochCount = 0;
+  let globalTime = 0;
   let cumulativeReward = 0;
   let fishIDCounter = 1;
   let predator;
@@ -276,13 +276,26 @@
       ctx.moveTo(points[0].x, points[0].y);
       points.forEach((point) => ctx.lineTo(point.x, point.y));
       ctx.closePath();
-
       ctx.fillStyle = "#00FF00";
       ctx.fill();
-
       ctx.strokeStyle = "#FFFFFF";
       ctx.lineWidth = 2;
       ctx.stroke();
+    });
+  }
+
+  function addReefDot(x, y) {
+    reefDots.push({ x, y });
+    // Reef dots remain indefinitely as a record of death,
+    // or you could remove older ones if desired.
+  }
+
+  function drawReefDots() {
+    reefDots.forEach(dot => {
+      const x = dot.x - params.reefDotSize / 2;
+      const y = dot.y - params.reefDotSize / 2;
+      ctx.fillStyle = '#00aaff';
+      ctx.fillRect(x, y, params.reefDotSize, params.reefDotSize);
     });
   }
 
@@ -361,14 +374,31 @@
       this.velocity = { x: randomInRange(-1, 1), y: randomInRange(-1, 1) };
       this.acceleration = { x: 0, y: 0 };
       this.hunger = params.fishMaxHunger;
-      this.health = 1.0;  // new health stat
+      this.health = 1.0;
       this.alive = true;
-      this.deathFade = 0; // frames after death for fading
+      this.deathFade = 0;
       this.epochsSurvived = 0;
       this.foodEaten = 0;
       this.baseHue = params.fishBaseColor;
       this.bodyLength = 10;
       this.bodyWidth = 4;
+      this.genes = {
+        speed: randomInRange(0.5, 1.5),
+        force: randomInRange(0.02, 0.05),
+        health: randomInRange(0.8, 1.2)
+      };
+    }
+
+    static reproduce(parent1, parent2) {
+      const child = new Fish();
+      child.genes.speed = (parent1.genes.speed + parent2.genes.speed)/2;
+      child.genes.force = (parent1.genes.force + parent2.genes.force)/2;
+      child.genes.health = (parent1.genes.health + parent2.genes.health)/2;
+      // Mutation
+      child.genes.speed *= 1 + randomInRange(-0.1,0.1);
+      child.genes.force *= 1 + randomInRange(-0.1,0.1);
+      child.genes.health *= 1 + randomInRange(-0.1,0.1);
+      return child;
     }
 
     update(fishArray) {
@@ -376,10 +406,11 @@
         this.velocity.x += this.acceleration.x;
         this.velocity.y += this.acceleration.y;
 
+        // Use gene-based speed and force limits
         const speed = Math.hypot(this.velocity.x, this.velocity.y);
-        if (speed > params.maxSpeed) {
-          this.velocity.x = (this.velocity.x / speed) * params.maxSpeed;
-          this.velocity.y = (this.velocity.y / speed) * params.maxSpeed;
+        if (speed > this.genes.speed) {
+          this.velocity.x = (this.velocity.x / speed) * this.genes.speed;
+          this.velocity.y = (this.velocity.y / speed) * this.genes.speed;
         }
 
         this.position.x += this.velocity.x;
@@ -390,26 +421,22 @@
 
         this.decreaseHunger();
         this.eatFood();
-
-        // Apply damage conditions
         this.applyDamage(fishArray);
 
-        // Check for death conditions
         if (this.hunger <= 0 || this.health <= 0) {
           this.alive = false;
+          addReefDot(this.position.x, this.position.y);
         } else {
           this.avoidEdges();
           this.avoidIslands();
         }
       } else {
-        // Dead fish: fade out
         this.deathFade++;
       }
     }
 
     applyDamage(fishArray) {
       let damageThisFrame = 0;
-
       // Island damage
       for (let island of islands) {
         if (pointInPolygon(this.position, island)) {
@@ -417,7 +444,7 @@
         }
       }
 
-      // Predator damage if close
+      // Predator damage
       if (predator) {
         const distPred = Math.hypot(this.position.x - predator.position.x, this.position.y - predator.position.y);
         if (distPred < 30) {
@@ -435,13 +462,13 @@
           }
         }
       });
-      if (closeCount > 3) { // more than 3 fish extremely close -> damage
+      if (closeCount > 3) {
         damageThisFrame += params.damageOvercrowd;
       }
 
       if (damageThisFrame > 0) {
         this.health -= damageThisFrame;
-        cumulativeReward -= damageThisFrame*0.5; // penalty to encourage learning avoidance
+        cumulativeReward -= damageThisFrame * 0.5;
       }
     }
 
@@ -492,18 +519,6 @@
         separation.y * w_sep +
         foodSteer.y * 1.0 +
         predAvoid.y * 2.0;
-
-      // Current
-      this.acceleration.x +=
-        ((-params.currentStrength +
-          randomInRange(-params.currentRandomness, params.currentRandomness)) *
-          (this.position.y - params.pondCenter.y)) /
-        params.pondRadius;
-      this.acceleration.y +=
-        ((params.currentStrength +
-          randomInRange(-params.currentRandomness, params.currentRandomness)) *
-          (this.position.x - params.pondCenter.x)) /
-        params.pondRadius;
     }
 
     avoidPredator(predator) {
@@ -518,8 +533,8 @@
           y: this.position.y - predator.position.y
         };
         const mag = Math.hypot(steer.x, steer.y);
-        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
-        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+        steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+        steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
         return steer;
       }
       return { x:0, y:0 };
@@ -539,14 +554,14 @@
         const desired = { x: target.position.x - this.position.x, y: target.position.y - this.position.y };
         const mag = Math.hypot(desired.x, desired.y);
         if (mag > 0) {
-          desired.x = (desired.x / mag) * params.maxSpeed;
-          desired.y = (desired.y / mag) * params.maxSpeed;
+          desired.x = (desired.x / mag) * this.genes.speed;
+          desired.y = (desired.y / mag) * this.genes.speed;
         }
         const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
         const smag = Math.hypot(steer.x, steer.y);
-        if (smag > params.maxForce) {
-          steer.x = (steer.x / smag) * params.maxForce;
-          steer.y = (steer.y / smag) * params.maxForce;
+        if (smag > this.genes.force) {
+          steer.x = (steer.x / smag) * this.genes.force;
+          steer.y = (steer.y / smag) * this.genes.force;
         }
         return steer;
       }
@@ -580,10 +595,9 @@
 
       const mag = Math.hypot(steer.x, steer.y);
       if (mag > 0) {
-        steer.x = (steer.x / mag) * params.maxSpeed - this.velocity.x;
-        steer.y = (steer.y / mag) * params.maxSpeed - this.velocity.y;
+        steer.x = (steer.x / mag) * this.genes.speed - this.velocity.x;
+        steer.y = (steer.y / mag) * this.genes.speed - this.velocity.y;
       }
-
       return steer;
     }
 
@@ -605,47 +619,36 @@
       }
     }
 
+    // Enhanced island avoidance
     avoidIslands() {
-        for (let island of islands) {
-          // Calculate island center
-          let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
-          let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+      for (let island of islands) {
+        let cx = island.reduce((s, p) => s + p.x, 0) / island.length;
+        let cy = island.reduce((s, p) => s + p.y, 0) / island.length;
+        const dx = this.position.x - cx;
+        const dy = this.position.y - cy;
+        const dist = Math.hypot(dx, dy);
 
-          const dx = this.position.x - cx;
-          const dy = this.position.y - cy;
-          const dist = Math.hypot(dx, dy);
+        const inside = pointInPolygon(this.position, island);
 
-          // Check if fish is inside the island
-          const inside = pointInPolygon(this.position, island);
-
-          if (inside) {
-            // If inside, push out strongly
-            // The direction is from island center to fish
+        if (inside) {
+          let dirX = dx / dist;
+          let dirY = dy / dist;
+          const force = 0.5;
+          this.acceleration.x += dirX * force;
+          this.acceleration.y += dirY * force;
+        } else {
+          const safeDistance = 50;
+          if (dist < safeDistance) {
             let dirX = dx / dist;
             let dirY = dy / dist;
-
-            // Strong force to push out
-            const force = 0.5; // Adjust force magnitude as needed
+            const proximity = (safeDistance - dist) / safeDistance;
+            const force = proximity * 0.1;
             this.acceleration.x += dirX * force;
             this.acceleration.y += dirY * force;
-          } else {
-            // If not inside, check how close to the island the fish is
-            // If too close, apply a weaker repulsive force
-            // Let's define a "safe distance" from island. For example:
-            const safeDistance = 50; // adjust as needed
-            if (dist < safeDistance) {
-              let dirX = dx / dist;
-              let dirY = dy / dist;
-              // The closer to the island, the stronger the force. Let's scale force by proximity.
-              const proximity = (safeDistance - dist) / safeDistance;
-              const force = proximity * 0.1; // smaller force than inside case
-              this.acceleration.x += dirX * force;
-              this.acceleration.y += dirY * force;
-            }
           }
         }
       }
-
+    }
 
     alignment(fishArray) {
       let sum = { x: 0, y: 0 };
@@ -667,15 +670,15 @@
 
         const mag = Math.hypot(sum.x, sum.y);
         if (mag > 0) {
-          sum.x = (sum.x / mag) * params.maxSpeed;
-          sum.y = (sum.y / mag) * params.maxSpeed;
+          sum.x = (sum.x / mag) * this.genes.speed;
+          sum.y = (sum.y / mag) * this.genes.speed;
         }
 
         const steer = { x: sum.x - this.velocity.x, y: sum.y - this.velocity.y };
         const steerMag = Math.hypot(steer.x, steer.y);
-        if (steerMag > params.maxForce) {
-          steer.x = (steer.x / steerMag) * params.maxForce;
-          steer.y = (steer.y / steerMag) * params.maxForce;
+        if (steerMag > this.genes.force) {
+          steer.x = (steer.x / steerMag) * this.genes.force;
+          steer.y = (steer.y / steerMag) * this.genes.force;
         }
         return steer;
       }
@@ -704,15 +707,15 @@
         const desired = { x: sum.x - this.position.x, y: sum.y - this.position.y };
         const mag = Math.hypot(desired.x, desired.y);
         if (mag > 0) {
-          desired.x = (desired.x / mag) * params.maxSpeed;
-          desired.y = (desired.y / mag) * params.maxSpeed;
+          desired.x = (desired.x / mag) * this.genes.speed;
+          desired.y = (desired.y / mag) * this.genes.speed;
         }
 
         const steer = { x: desired.x - this.velocity.x, y: desired.y - this.velocity.y };
         const steerMag = Math.hypot(steer.x, steer.y);
-        if (steerMag > params.maxForce) {
-          steer.x = (steer.x / steerMag) * params.maxForce;
-          steer.y = (steer.y / steerMag) * params.maxForce;
+        if (steerMag > this.genes.force) {
+          steer.x = (steer.x / steerMag) * this.genes.force;
+          steer.y = (steer.y / steerMag) * this.genes.force;
         }
         return steer;
       }
@@ -721,23 +724,16 @@
     }
 
     draw() {
-      let hue = this.baseHue + this.epochsSurvived * 40;
-
       if (!this.alive) {
-        // Dead fish: fade to dark blue and fade out
-        const fadeFactor = Math.min(this.deathFade/200,1); // after ~200 frames fully faded
-        // Dark blue hue: hsl(210,100%,20%)
-        // Interpolate hue and brightness if desired, or just pick dark blue
+        const fadeFactor = Math.min(this.deathFade/200,1);
         ctx.save();
         ctx.translate(this.position.x, this.position.y);
-
         ctx.globalAlpha = 1 - fadeFactor;
         ctx.fillStyle = "hsl(210,100%,20%)";
         ctx.beginPath();
         ctx.ellipse(0,0,this.bodyLength,this.bodyWidth,0,0,2*Math.PI);
         ctx.fill();
 
-        // tail (flag)
         ctx.save();
         ctx.translate(-this.bodyLength,0);
         ctx.beginPath();
@@ -749,10 +745,8 @@
         ctx.fill();
         ctx.restore();
 
-        // Slightly longer side fins
         ctx.save();
         ctx.translate(-3,0);
-        // top fin
         ctx.beginPath();
         ctx.moveTo(0,0);
         ctx.lineTo(-7,-2);
@@ -760,30 +754,26 @@
         ctx.closePath();
         ctx.fillStyle='rgba(100,100,255,0.8)';
         ctx.fill();
-        // bottom fin
         ctx.beginPath();
         ctx.moveTo(0,0);
         ctx.lineTo(-7,2);
         ctx.lineTo(-7,6);
         ctx.closePath();
-        ctx.fillStyle='rgba(100,100,255,0.8)';
         ctx.fill();
         ctx.restore();
-
         ctx.restore();
         return;
       }
 
-      // Alive fish
       const tailAngle = Math.sin(globalTime*0.2 + this.fishID) * 0.5;
       const finAngle = Math.sin(globalTime*0.4 + this.fishID) * 0.3;
+      let hue = this.baseHue + this.epochsSurvived * 40;
 
       ctx.save();
       ctx.translate(this.position.x, this.position.y);
       ctx.rotate(Math.atan2(this.velocity.y, this.velocity.x));
 
       ctx.fillStyle = `hsl(${hue},100%,50%)`;
-      // Body
       ctx.beginPath();
       ctx.ellipse(0,0,this.bodyLength,this.bodyWidth,0,0,2*Math.PI);
       ctx.fill();
@@ -801,7 +791,7 @@
       ctx.fill();
       ctx.restore();
 
-      // Side fins (slightly longer)
+      // Longer fins
       ctx.save();
       ctx.translate(-3,0);
       // top fin
@@ -935,6 +925,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawPond();
     drawIslands();
+    drawReefDots(); // draw past death locations
 
     if (stepCount % params.foodSpawnInterval === 0) {
       spawnFoodOffCoast();
@@ -965,6 +956,7 @@
     if (stepCount >= params.stepsPerEpoch) {
       epochCount++;
       updatePolicy();
+      breedNextGeneration();
       respawnDeadFish();
       stepCount = 0;
       cumulativeReward = 0;
@@ -976,6 +968,7 @@
   }
 
   function updatePolicy() {
+    // Simple heuristic: If cumulativeReward > 0, slightly adjust weights
     if (cumulativeReward > 0) {
       params.w_alignment += params.learningRate * 0.1;
       params.w_cohesion += params.learningRate * 0.1;
@@ -991,18 +984,39 @@
     params.w_separation = Math.max(0, Math.min(5, params.w_separation));
   }
 
+  // Breed next generation using top-performing fish as parents
+  function breedNextGeneration() {
+    // Sort fish by performance (foodEaten) as a proxy for fitness
+    const aliveFish = fishArray.filter(f => f.alive);
+    const sorted = aliveFish.slice().sort((a,b) => b.foodEaten - a.foodEaten);
+
+    // If less than 2 fish alive, can't breed effectively
+    if (sorted.length < 2) return;
+
+    // Take top two as parents
+    const parent1 = sorted[0];
+    const parent2 = sorted[1];
+
+    // For dead fish, we might assign them offspring from these parents next epoch
+    fishArray.forEach(fish => {
+      if (!fish.alive) {
+        // Replace this dead fish with offspring
+        const child = Fish.reproduce(parent1, parent2);
+        // Transfer child's position, keep random location inside pond center
+        fish.genes = child.genes;
+      }
+    });
+  }
+
   function respawnDeadFish() {
-    // Remove fully faded dead fish and respawn them
     fishArray.forEach((fish) => {
       if (!fish.alive) {
-        // If fish had time to fade out (deathFade large)
-        // Even if not fully faded, we still respawn each epoch anyway.
         fish.position.x = params.pondCenter.x + randomInRange(-params.pondRadius/3, params.pondRadius/3);
         fish.position.y = params.pondCenter.y + randomInRange(-params.pondRadius/3, params.pondRadius/3);
         fish.velocity.x = randomInRange(-1,1);
         fish.velocity.y = randomInRange(-1,1);
         fish.hunger = params.fishMaxHunger;
-        fish.health = 1.0;
+        fish.health = fish.genes.health; // reset health to gene-based baseline
         fish.alive = true;
         fish.deathFade = 0;
         fish.foodEaten = 0;
@@ -1055,7 +1069,6 @@
     params.cohesionWeight = parseFloat(e.target.value);
   });
 
-  // Toggle scoreboard
   const scoreboard = document.getElementById("scoreboard");
   const toggleScoreBtn = document.getElementById("toggleScoreboardBtn");
   toggleScoreBtn.addEventListener("click", () => {
@@ -1068,7 +1081,6 @@
     }
   });
 
-  // Toggle hunger display
   const toggleHungerBtn = document.getElementById("toggleHungerBtn");
   toggleHungerBtn.addEventListener("click", () => {
     params.showHunger = !params.showHunger;
