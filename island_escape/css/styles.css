@@ -1,0 +1,29 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f5dc; /* A sandy background for ambiance */
+    margin: 20px;
+    color: #333;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.control-panel {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: row;
+    gap: 40px;
+}
+
+.parameters, .info-panel {
+    border: 1px solid #ccc;
+    padding: 10px;
+}
+
+canvas {
+    border: 2px solid #333;
+    background: #f0e68c; /* Light sandy color for the island area */
+}

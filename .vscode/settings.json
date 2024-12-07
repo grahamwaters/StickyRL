@@ -3,5 +3,6 @@
         "activityBar.background": "#31235E",
         "titleBar.activeBackground": "#443183",
         "titleBar.activeForeground": "#FBFBFD"
-    }
+    },
+    "eslint.enable": false
 }
