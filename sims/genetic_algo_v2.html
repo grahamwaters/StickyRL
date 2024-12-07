@@ -162,7 +162,7 @@
     pondRadius: Math.min(canvas.width, canvas.height) / 3 + sizeFactor,
     pondCenter: { x: canvas.width / 2, y: canvas.height / 2 },
     fishCount: sizeFactor - 12,
-    maxSpeed: 0.5,
+    maxSpeed: 0.2,
     maxForce: 0.05,
     perceptionRadius: 20,
     separationDistance: 10,
@@ -193,8 +193,8 @@
     reefDotSize: 2,
     // Damage parameters
     damageIsland: 0.009,
-    damagePredator: 0.01,
-    damageOvercrowd: 0.01,
+    damagePredator: 0.01, //increased
+    damageOvercrowd: 0.01, // increased
   };
 
   const fishArray = [];
