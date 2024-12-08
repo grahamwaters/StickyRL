@@ -216,6 +216,8 @@
     </div>
 
     <script>
+        //fixes needed
+         <!-- fish should be swimming below the aquatic plants not above them. -->
       // Global parameters and variables
       let epsilon = 0.1; // epsilon for predator strategy
       const canvas = document.getElementById("simulationCanvas");
@@ -1418,7 +1420,7 @@
         draw() {
           ctx.save();
           ctx.translate(this.position.x, this.position.y);
-          ctx.fillStyle = "darkgreen";
+          ctx.fillStyle = "lightgreen";
           ctx.beginPath();
           ctx.arc(0,0,10,0,Math.PI*2);
           ctx.fill();
@@ -1437,6 +1439,120 @@
         }
       }
 
+      class Bear {
+        constructor() {
+          // Start bear somewhere in forest:
+          const angle = Math.random() * 2 * Math.PI;
+          const dist = params.pondRadius + 200;
+          this.position = {x: params.pondCenter.x + Math.cos(angle) * dist, y: params.pondCenter.y + Math.sin(angle) * dist};
+          this.velocity = {x:0, y:0};
+          this.maxSpeed = 0.5;
+          this.hunger = 1.0;
+        }
+
+        update(fishArray) {
+          // Bear hunts fish near shore and eats forest plants
+          let target = this.huntTarget(fishArray);
+          if (!target) {
+            target = this.findPlantOrRandom();
+          }
+
+          let dx = target.x - this.position.x;
+          let dy = target.y - this.position.y;
+          let mag = Math.hypot(dx, dy);
+          if (mag > 0) { dx /= mag; dy /= mag; }
+
+          this.velocity.x = dx * this.maxSpeed;
+          this.velocity.y = dy * this.maxSpeed;
+          this.position.x += this.velocity.x;
+          this.position.y += this.velocity.y;
+
+          this.hunger -= 0.0002;
+          if (this.hunger < 0) this.hunger = 0;
+
+          // Eat forest plant if close
+          forestPlants.forEach(p => {
+            if (!p.eaten) {
+              let d = Math.hypot(this.position.x - p.x, this.position.y - p.y);
+              if (d < 10) {
+                p.eaten = true;
+                this.hunger = 1.0;
+              }
+            }
+          });
+
+          // If close to fish near shore, kill fish
+          fishArray.forEach(f => {
+            if (f.alive) {
+              let d = Math.hypot(f.position.x - this.position.x, f.position.y - this.position.y);
+              if (d < 20) {
+                f.health = 0; // kill fish
+                this.hunger = 1.0;
+              }
+            }
+          });
+        }
+
+        huntTarget(fishArray) {
+          // Find fish near pond shore
+          let closestDist = Infinity;
+          let closestFish = null;
+          for (let f of fishArray) {
+            if (f.alive) {
+              let d = Math.hypot(f.position.x - params.pondCenter.x, f.position.y - params.pondCenter.y);
+              let edgeDist = Math.abs(d - params.pondRadius);
+              if (edgeDist < 30) {
+                let dx = f.position.x - this.position.x;
+                let dy = f.position.y - this.position.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                  closestFish = f;
+                }
+              }
+            }
+          }
+          if (closestFish) return closestFish.position;
+          return null;
+        }
+
+        findPlantOrRandom() {
+          // Find nearest uneaten forest plant
+          let closestDist = Infinity;
+          let closestPlant = null;
+          for (let p of forestPlants) {
+            if (!p.eaten) {
+              let d = Math.hypot(p.x - this.position.x, p.y - this.position.y);
+              if (d < closestDist) {
+                closestDist = d;
+                closestPlant = p;
+              }
+            }
+          }
+          if (closestPlant) return {x: closestPlant.x, y: closestPlant.y};
+          // Else, roam randomly
+          const angle = Math.random() * 2 * Math.PI;
+          const r = 50; // roam within 50 units
+          return {x: this.position.x + Math.cos(angle) * r, y: this.position.y + Math.sin(angle) * r};
+        }
+
+        draw() {
+          ctx.save();
+          ctx.translate(this.position.x, this.position.y);
+          ctx.fillStyle = "black";
+          ctx.beginPath();
+          ctx.arc(0, 0, 10, 0, Math.PI * 2);
+          ctx.fill();
+          // Bear ears
+          ctx.fillStyle = "black";
+          ctx.beginPath();
+          ctx.arc(-5, -10, 3, 0, Math.PI * 2);
+          ctx.arc(5, -10, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
       generateIslands(params.islandCount);
       generateForest();
       generateAquaticPlants();
@@ -1446,6 +1562,7 @@
 
       predator = new Predator();
       turtle = new Turtle();
+      bear = new Bear();
 
       function animate() {
         globalTime += 1;
@@ -1506,6 +1623,9 @@
 
         turtle.update(fishArray);
         turtle.draw();
+
+        <!-- bear.update(fishArray); -->
+        bear.draw(); //the bear is not being rendered correctly here. FIXME.
 
         let aliveCount = fishArray.filter((f) => f.alive).length;
         cumulativeReward += aliveCount * 0.001;
