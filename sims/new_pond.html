@@ -1600,7 +1600,7 @@
         drawForest();
         drawPond();
         drawIslands();
-        drawAquaticPlants();
+
         drawReefDots();
 
         if (stepCount % params.foodSpawnInterval === 0) {
@@ -1620,6 +1620,9 @@
 
         predator.update(fishArray);
         predator.draw();
+
+
+        drawAquaticPlants();
 
         turtle.update(fishArray);
         turtle.draw();
